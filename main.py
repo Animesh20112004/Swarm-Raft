@@ -28,11 +28,11 @@ def main():
     
     true_x = [d.true_pos[0] for d in world.drones]
     true_y = [d.true_pos[1] for d in world.drones]
-    plt.scatter(true_x, true_y, marker='x', color='green', label='True Position [cite: 290]')
+    plt.scatter(true_x, true_y, marker='x', color='green', label='True Position')
 
     rep_x = [d.gnss_pos[0] for d in world.drones]
     rep_y = [d.gnss_pos[1] for d in world.drones]
-    plt.scatter(rep_x, rep_y, marker='^', color='red', label='Reported (Noisy/Spoofed) [cite: 290]')
+    plt.scatter(rep_x, rep_y, marker='^', color='red', label='Reported (Noisy/Spoofed)')
 
     for i in range(config['n']):
         plt.plot([true_x[i], rep_x[i]], [true_y[i], rep_y[i]], 'k--', alpha=0.3)
