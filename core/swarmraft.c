@@ -27,8 +27,7 @@ void verify_neighbors(int n, Point3D* reports, double* dist_matrix, double thres
 
 Point3D recover_position(int target_idx, int n, Point3D* reports, double* dist_matrix, bool* fault_flags, int max_iterations) {
     Point3D p = reports[target_idx]; 
-    double step_size = 0.01;
-    double tolerance = 1e-6;
+    double step = 0.2; // Initial bold step
 
     for (int k = 0; k < max_iterations; k++) {
         double grad_x = 0, grad_y = 0, grad_z = 0;
@@ -41,23 +40,28 @@ Point3D recover_position(int target_idx, int n, Point3D* reports, double* dist_m
             double d_meas = dist_matrix[target_idx * n + j];
             double err = d_curr - d_meas;
 
-            if (d_curr > 0.0001) {
-                grad_x += err * (p.x - reports[j].x) / d_curr;
-                grad_y += err * (p.y - reports[j].y) / d_curr;
-                grad_z += err * (p.z - reports[j].z) / d_curr;
+            if (d_curr > 0.01) {
+                // Accumulate normalized direction
+                grad_x += (err * (p.x - reports[j].x) / d_curr);
+                grad_y += (err * (p.y - reports[j].y) / d_curr);
+                grad_z += (err * (p.z - reports[j].z) / d_curr);
                 anchors++;
             }
         }
-        if (anchors < 3) return reports[target_idx];
-        grad_x /= anchors;
-        grad_y /= anchors;
-        grad_z /= anchors;
 
-        p.x -= step_size * grad_x;
-        p.y -= step_size * grad_y;
-        p.z -= step_size * grad_z;
+        // If we don't have enough anchors, don't guess—stay with INS
+        if (anchors < 3) return reports[target_idx]; 
 
-        if (sqrt(grad_x*grad_x + grad_y*grad_y + grad_z*grad_z) < tolerance) break;
+        // Apply averaged update
+        p.x -= (step * grad_x / anchors);
+        p.y -= (step * grad_y / anchors);
+        p.z -= (step * grad_z / anchors);
+
+        // Adaptive Step Reduction: Slow down to "land" on the true position
+        step *= 0.98; 
+        
+        // Convergence check: if gradient is tiny, we are done
+        if (fabs(grad_x) + fabs(grad_y) < 1e-5) break;
     }
     return p;
 }
