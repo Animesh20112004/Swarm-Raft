@@ -3,121 +3,118 @@ import numpy as np
 import time
 import threading
 from simulation.world import SwarmWorld
-from simulation.attacks import Adversary
 from simulation.bridge import SwarmRaftBridge
 
-# --- Constants & Colors ---
-SCREEN_SIZE = 800
-SCALE = 10  # Pixels per meter
-WHITE = (255, 255, 255)
-GREEN = (0, 255, 0)     # True Position
-RED = (255, 0, 0)       # Spoofed/Noisy
-GOLD = (255, 215, 0)    # Recovered
-GRAY = (100, 100, 100)
+# --- Styling & Config ---
+SCREEN_W, SCREEN_H = 1000, 800
+CENTER = (SCREEN_W // 2, SCREEN_H // 2)
+SCALE = 10.0 
+WORLD_SPEED = 2.0
+LERP_FACTOR = 0.1 
 
-class App:
+class SwarmRaftSim:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((SCREEN_SIZE, SCREEN_SIZE))
-        pygame.display.set_caption("SwarmRaft Live Defense Simulation")
+        self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("Arial", 18)
-
-        # Swarm Logic
+        self.font = pygame.font.SysFont("Consolas", 14)
+        
+        # Configuration
         self.config = {
-            'n': 10, 'f': 4, 'R_GNSS': 0.5, 'R_INS': 0.1, 
-            'sigma_d': 0.05, 'dt': 0.1, 'spoof_bias': np.array([15.0, 15.0, 0.0])
+            'n': 10, 'f': 4, 'R_GNSS': 0.4, 'sigma_d': 0.05, 
+            'dt': 0.1, 'spoof_bias': np.array([30.0, 20.0, 0.0])
         }
+        
         self.world = SwarmWorld(self.config)
-        self.adversary = Adversary(self.config)
         self.bridge = SwarmRaftBridge()
 
-        # State Control
-        self.paused = False
-        self.is_spoofed = False
-        self.recovery_active = False
-        self.last_spoof_time = 0
-        self.recovered_pos = None
+        # Camera States
+        self.view_x, self.view_y = 0.0, 0.0
+        self.grid_y = 0
+        
+        # Logic States
+        self.active_attack = False
+        self.attack_start_time = 0
+        self.malicious_ids = []
         self.fault_flags = [False] * self.config['n']
 
     def handle_recovery(self):
-        """Runs the C-Core logic in a background thread to prevent lag."""
-        print("\n[CLI] --- CONSENSUS TRIGGERED ---")
-        reports = self.world.get_all_reports()
+        """The Consensus Trigger"""
+        print("\n[CLI] T+2.0s: DRIFT DETECTED. EXECUTING CONSENSUS...")
+        
+        # 1. Get current reports (including spoofed coordinates)
+        reports = self.world.get_all_reports(attacked_indices=self.malicious_ids)
+        
+        # 2. Get the FRESH distance matrix (the truth from the world)
         dist_matrix = self.world.get_full_distance_matrix()
         
-        # Apply attack to the data being processed
-        _, attacked_dist = self.adversary.apply_attacks(self.world.drones, dist_matrix)
-        
+        # 3. Call C-Core
         start_time = time.time()
-        self.recovered_pos, self.fault_flags = self.bridge.run_swarmraft(reports, attacked_dist, threshold=3.0)
-        end_time = time.time()
+        # Increased threshold to account for high-velocity drift noise
+        recovered_pos, flags = self.bridge.run_swarmraft(reports, dist_matrix, threshold=5.0)
         
-        print(f"[CLI] Stage 1: {sum(self.fault_flags)} drones flagged as Byzantine.")
-        print(f"[CLI] Stage 2: Multilateration complete in {(end_time - start_time)*1000:.2f}ms")
-        print("[CLI] Results broadcasted to swarm. INS states reset.")
-        self.recovery_active = True
+        # 4. PHYSICAL CORRECTION: This is what makes them snap back
+        for i in range(self.config['n']):
+            if flags[i]:
+                # Force the drone back to the consensus-calculated truth
+                self.world.drones[i].true_pos = recovered_pos[i]
+
+        print(f"[CLI] Consensus Reached in {(time.time() - start_time)*1000:.2f}ms.")
+        print(f"[CLI] {sum(flags)} nodes re-synced with swarm cluster.")
+        
+        # Reset attack state
+        self.active_attack = False
+        self.malicious_ids = []
 
     def run(self):
-        running = True
-        while running:
-            self.screen.fill((20, 20, 20)) # Dark background
+        while True:
+            self.screen.fill((10, 10, 15))
             
-            # 1. Event Handling
+            # Draw Background Grid
+            self.grid_y = (self.grid_y + WORLD_SPEED) % 100
+            for y in range(int(self.grid_y), SCREEN_H, 100):
+                pygame.draw.line(self.screen, (20, 20, 40), (0, y), (SCREEN_W, y))
+
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE: # Pause/Play
-                        self.paused = not self.paused
-                        print(f"[CLI] System {'Paused' if self.paused else 'Resumed'}")
-                    if event.key == pygame.K_s and not self.is_spoofed: # Spoof
-                        self.is_spoofed = True
-                        self.last_spoof_time = time.time()
-                        print("[CLI] ALERT: GNSS Spoofing attack detected on f drones!")
+                if event.type == pygame.QUIT: return
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_s:
+                    if not self.active_attack:
+                        self.active_attack = True
+                        self.attack_start_time = time.time()
+                        self.malicious_ids = list(range(self.config['f']))
+                        print(f"[CLI] ALERT: Nodes 0-{self.config['f']-1} breaking formation!")
 
-            # 2. Physics & Logic Update
-            if not self.paused:
-                self.world.generate_step(k=1)
-                
-                # Check for automatic recovery (2 seconds after spoofing)
-                if self.is_spoofed and (time.time() - self.last_spoof_time > 2.0) and not self.recovery_active:
-                    threading.Thread(target=self.handle_recovery).start()
+            # Update Physics
+            atk_list = self.malicious_ids if self.active_attack else None
+            self.world.generate_step(malicious_indices=atk_list)
 
-            # 3. Drawing
-            self.draw_ui()
-            reports = self.world.get_all_reports()
+            # Auto-Recovery
+            if self.active_attack and (time.time() - self.attack_start_time > 2.0):
+                # We use a thread so the screen doesn't freeze during C-calculation
+                threading.Thread(target=self.handle_recovery).start()
+
+            # Camera Smoothing (Center on Honest Majority)
+            honest_nodes = [d.true_pos for i, d in enumerate(self.world.drones) if i not in self.malicious_ids]
+            target_x, target_y = np.mean(honest_nodes, axis=0)[:2] if honest_nodes else (0,0)
             
-            for i, drone in enumerate(self.world.drones):
-                # Convert coords to screen pixels
-                true_px = (int(drone.true_pos[0] * SCALE + 100), int(drone.true_pos[1] * SCALE + 400))
-                rep_px = (int(reports[i][0] * SCALE + 100), int(reports[i][1] * SCALE + 400))
+            self.view_x += (target_x - self.view_x) * LERP_FACTOR
+            self.view_y += (target_y - self.view_y) * LERP_FACTOR
 
-                # Draw True Position (Green)
-                pygame.draw.circle(self.screen, GREEN, true_px, 4)
+            # Draw Drones
+            for i, d in enumerate(self.world.drones):
+                sx = (d.true_pos[0] - self.view_x) * SCALE + CENTER[0]
+                sy = (d.true_pos[1] - self.view_y) * SCALE + CENTER[1]
                 
-                # Draw Reported Position (Red)
-                pygame.draw.circle(self.screen, RED, rep_px, 4, 1)
-                pygame.draw.line(self.screen, GRAY, true_px, rep_px, 1)
-
-                # Draw Recovered Position (Gold Star)
-                if self.recovery_active and self.recovered_pos is not None:
-                    rec_px = (int(self.recovered_pos[i][0] * SCALE + 100), int(self.recovered_pos[i][1] * SCALE + 400))
-                    pygame.draw.circle(self.screen, GOLD, rec_px, 6)
-                    if self.fault_flags[i]:
-                        pygame.draw.line(self.screen, GOLD, rep_px, rec_px, 2)
+                # If the drone is currently drifting, make it RED
+                color = (255, 50, 50) if i in self.malicious_ids else (0, 255, 120)
+                pygame.draw.circle(self.screen, color, (int(sx), int(sy)), 6)
+                
+                # Name Tag
+                tag = self.font.render(f"UAV-{i}", True, (200, 200, 200))
+                self.screen.blit(tag, (sx + 8, sy - 8))
 
             pygame.display.flip()
-            self.clock.tick(30)
-
-        pygame.quit()
-
-    def draw_ui(self):
-        controls = "SPACE: Pause/Play | S: Inject Spoof Attack"
-        status = f"Status: {'PAUSED' if self.paused else 'RUNNING'} | Spoofed: {self.is_spoofed} | Shield: {self.recovery_active}"
-        
-        self.screen.blit(self.font.render(controls, True, WHITE), (20, 20))
-        self.screen.blit(self.font.render(status, True, WHITE), (20, 45))
+            self.clock.tick(60)
 
 if __name__ == "__main__":
-    App().run()
+    SwarmRaftSim().run()

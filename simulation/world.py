@@ -1,50 +1,48 @@
 import numpy as np
-from .drone import Drone
+from simulation.drone import Drone
 
 class SwarmWorld:
     def __init__(self, config):
         self.config = config
-        self.n = config.get('n', 6)
-        self.dt = config.get('dt', 0.1)
-
+        self.n = config['n']
         self.drones = []
         self._setup_swarm()
 
     def _setup_swarm(self):
-        """Initializes drones at starting positions (e.g., a simple grid or line)."""
+        """Spawns drones in a 6x6 meter random cluster."""
         for i in range(self.n):
-            start_pos = [i * 10.0, 0.0, 10.0] 
+            start_pos = np.array([
+                np.random.uniform(-3, 3), 
+                np.random.uniform(-3, 3), 
+                0.0
+            ])
             self.drones.append(Drone(i, start_pos, self.config))
 
-    def generate_step(self, k):
-        """
-        Updates the true position of all drones for time step k.
-        In this example, drones move in a simple forward trajectory with 
-        slight random variation.
-        """
-        velocity = np.array([1.0, 0.2, 0.0]) * self.dt
-        
-        for drone in self.drones:
-            new_true_pos = drone.true_pos + velocity
-            drone.update_ground_truth(new_true_pos)
-            drone.update_ins(velocity)
+    def generate_step(self, malicious_indices=None):
+        dt = self.config['dt']
+        for i, drone in enumerate(self.drones):
+            # Base Swarm Velocity (Slow cruise North)
+            velocity = np.array([0.0, 1.2, 0.0])
             
-            drone.sense_gnss()
+            # If spoofed, add a slow "Break Formation" drift
+            if malicious_indices and i in malicious_indices:
+                velocity += np.array([2.5, 0.8, 0.0]) 
+                
+            drone.update_ins(velocity, dt)
+
+    def get_all_reports(self, attacked_indices=None):
+        reports = []
+        for i, drone in enumerate(self.drones):
+            bias = self.config['spoof_bias'] if (attacked_indices and i in attacked_indices) else None
+            reports.append(drone.sense_gnss(bias))
+        return np.array(reports)
 
     def get_full_distance_matrix(self):
-        """
-        Computes the inter-drone distance matrix d_ij,k.
-        This is the data the leader node will use for verification[cite: 86, 92].
-        """
-        matrix = np.zeros((self.n, self.n))
-        for i in range(self.n):
-            for j in range(self.n):
-                if i == j:
-                    matrix[i, j] = 0.0
-                else:
-                    matrix[i, j] = self.drones[i].get_range_to(self.drones[j].true_pos)
+        n = len(self.drones)
+        matrix = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                if i == j: continue
+                dist = np.linalg.norm(self.drones[i].true_pos - self.drones[j].true_pos)
+                matrix[i, j] = dist + np.random.normal(0, self.config['sigma_d'])
         return matrix
-
-    def get_all_reports(self):
-        """Collects reported (GNSS) positions from all nodes[cite: 87, 142]."""
-        return np.array([d.gnss_pos for d in self.drones])
