@@ -21,47 +21,51 @@ void verify_neighbors(int n, Point3D* reports, double* dist_matrix, double thres
                 votes--;
             }
         }
+        // Flag based on majority [cite: 120]
         fault_flags[i] = (votes < 0);
     }
 }
 
 Point3D recover_position(int target_idx, int n, Point3D* reports, double* dist_matrix, bool* fault_flags, int max_iterations) {
     Point3D p = reports[target_idx]; 
-    double step = 0.2; // Initial bold step
+    double step_size = 0.01; // Smaller, more stable step
+    double tolerance = 1e-6;
 
     for (int k = 0; k < max_iterations; k++) {
         double grad_x = 0, grad_y = 0, grad_z = 0;
         int anchors = 0;
 
         for (int j = 0; j < n; j++) {
+            // Only use verified non-faulty neighbors [cite: 174, 182]
             if (target_idx == j || fault_flags[j]) continue;
 
             double d_curr = get_dist(p, reports[j]);
             double d_meas = dist_matrix[target_idx * n + j];
             double err = d_curr - d_meas;
 
-            if (d_curr > 0.01) {
-                // Accumulate normalized direction
-                grad_x += (err * (p.x - reports[j].x) / d_curr);
-                grad_y += (err * (p.y - reports[j].y) / d_curr);
-                grad_z += (err * (p.z - reports[j].z) / d_curr);
+            if (d_curr > 0.0001) {
+                // Gradient of the squared error: (||p - x_j|| - d_meas) * (p - x_j) / ||p - x_j|| [cite: 181]
+                grad_x += err * (p.x - reports[j].x) / d_curr;
+                grad_y += err * (p.y - reports[j].y) / d_curr;
+                grad_z += err * (p.z - reports[j].z) / d_curr;
                 anchors++;
             }
         }
 
-        // If we don't have enough anchors, don't guess—stay with INS
-        if (anchors < 3) return reports[target_idx]; 
+        // Fallback: If Stage 1 flagged too many drones, rely on original report or INS [cite: 189, 202]
+        if (anchors < 3) return reports[target_idx];
 
-        // Apply averaged update
-        p.x -= (step * grad_x / anchors);
-        p.y -= (step * grad_y / anchors);
-        p.z -= (step * grad_z / anchors);
+        // Normalize gradient by number of anchors to ensure O(N^2) scaling [cite: 203, 347]
+        grad_x /= anchors;
+        grad_y /= anchors;
+        grad_z /= anchors;
 
-        // Adaptive Step Reduction: Slow down to "land" on the true position
-        step *= 0.98; 
-        
-        // Convergence check: if gradient is tiny, we are done
-        if (fabs(grad_x) + fabs(grad_y) < 1e-5) break;
+        p.x -= step_size * grad_x;
+        p.y -= step_size * grad_y;
+        p.z -= step_size * grad_z;
+
+        // Check for convergence
+        if (sqrt(grad_x*grad_x + grad_y*grad_y + grad_z*grad_z) < tolerance) break;
     }
     return p;
 }
