@@ -7,7 +7,7 @@ from simulation.bridge import SwarmRaftBridge
 def main():
     # 1. Configuration (matches Phase 1 results)
     config = {
-        'n': 6,
+        'n': 10,
         'f': 2,
         'R_GNSS': 0.5,
         'R_INS': 0.1,

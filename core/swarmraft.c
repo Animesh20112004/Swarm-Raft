@@ -14,21 +14,21 @@ void verify_neighbors(int n, Point3D* reports, double* dist_matrix, double thres
             double d_rep = get_dist(reports[i], reports[j]);
             double d_meas = dist_matrix[i * n + j];
 
-
+            // Stage 1: Consistency check [cite: 84]
             if (fabs(d_rep - d_meas) < threshold) {
                 votes++;
             } else {
                 votes--;
             }
         }
-        
         fault_flags[i] = (votes < 0);
     }
 }
 
 Point3D recover_position(int target_idx, int n, Point3D* reports, double* dist_matrix, bool* fault_flags, int max_iterations) {
-    Point3D p = reports[target_idx];
-    double step_size = 0.1;
+    Point3D p = reports[target_idx]; 
+    double step_size = 0.01;
+    double tolerance = 1e-6;
 
     for (int k = 0; k < max_iterations; k++) {
         double grad_x = 0, grad_y = 0, grad_z = 0;
@@ -41,19 +41,23 @@ Point3D recover_position(int target_idx, int n, Point3D* reports, double* dist_m
             double d_meas = dist_matrix[target_idx * n + j];
             double err = d_curr - d_meas;
 
-            if (d_curr > 0.001) {
+            if (d_curr > 0.0001) {
                 grad_x += err * (p.x - reports[j].x) / d_curr;
                 grad_y += err * (p.y - reports[j].y) / d_curr;
                 grad_z += err * (p.z - reports[j].z) / d_curr;
                 anchors++;
             }
         }
-
-        if (anchors < 3) break; 
+        if (anchors < 3) return reports[target_idx];
+        grad_x /= anchors;
+        grad_y /= anchors;
+        grad_z /= anchors;
 
         p.x -= step_size * grad_x;
         p.y -= step_size * grad_y;
         p.z -= step_size * grad_z;
+
+        if (sqrt(grad_x*grad_x + grad_y*grad_y + grad_z*grad_z) < tolerance) break;
     }
     return p;
 }
