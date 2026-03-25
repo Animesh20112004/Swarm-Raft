@@ -6,11 +6,7 @@ class Adversary:
         self.spoof_bias = config.get('spoof_bias', np.array([50.0, 50.0, 0.0]))
 
     def apply_attacks(self, drones, dist_matrix):
-        """
-        Scenario 1: GNSS Spoofing
-        Scenario 2: Ranging Tampering
-        Scenario 3: Collusion
-        """
+
         n = len(drones)
         faulty_indices = np.random.choice(n, self.f, replace=False)
         
