@@ -1,12 +1,12 @@
-# Compiler settings
 CC = gcc
-CFLAGS = -fPIC -O3 -shared
-TARGET = core/build/libswarmraft.so
+CFLAGS = -fPIC -shared -O3
+TARGET = core/build/libswarmraft.dll
+SRC = core/swarmraft.c
 
-# Ensure the build directory exists and compile
-all:
-	mkdir -p core/build
-	$(CC) $(CFLAGS) -o $(TARGET) core/swarmraft.c -lm
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) -lm
 
 clean:
-	rm -f $(TARGET)
+	del /f core\build\libswarmraft.dll

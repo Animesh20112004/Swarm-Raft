@@ -1,30 +1,20 @@
 #ifndef SWARMRAFT_H
 #define SWARMRAFT_H
 
-#include <stdbool.h>
-
 typedef struct {
-    double x;
-    double y;
-    double z;
-} Point3D;
+    double x, y, z;
+} Position;
 
-
-void verify_neighbors(
+// Interface for Python via ctypes
+void verify_and_recover(
     int n, 
-    Point3D* reports, 
-    double* dist_matrix, 
+    Position* reported, 
+    double* distance_matrix, 
     double threshold, 
-    bool* fault_flags
-);
-
-Point3D recover_position(
-    int target_idx,
-    int n,
-    Point3D* reports,
-    double* dist_matrix,
-    bool* fault_flags,
-    int max_iterations
+    double epsilon, 
+    int max_iter, 
+    Position* out_verified, 
+    int* out_faulty_flags
 );
 
 #endif

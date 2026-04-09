@@ -8,12 +8,23 @@ class SwarmWorld:
         self.drones = []
         self._setup_swarm()
 
+    # In simulation/world.py
+
+    # In simulation/world.py
     def _setup_swarm(self):
-        """Spawns drones in a 6x6 meter random cluster."""
+        """Spawns drones in a tight circular cluster."""
+        center_x, center_y = 0.0, 0.0
+        # Reduce max_radius to 0.5 for a very tight cluster
+        max_radius = 0.5 
+        
         for i in range(self.n):
+            angle = np.random.uniform(0, 2 * np.pi)
+            # Square root ensures drones aren't just at the center
+            r = max_radius * np.sqrt(np.random.uniform(0, 1))
+            
             start_pos = np.array([
-                np.random.uniform(-3, 3), 
-                np.random.uniform(-3, 3), 
+                center_x + r * np.cos(angle),
+                center_y + r * np.sin(angle),
                 0.0
             ])
             self.drones.append(Drone(i, start_pos, self.config))
@@ -33,7 +44,9 @@ class SwarmWorld:
     def get_all_reports(self, attacked_indices=None):
         reports = []
         for i, drone in enumerate(self.drones):
-            bias = self.config['spoof_bias'] if (attacked_indices and i in attacked_indices) else None
+            # Change from: if (attacked_indices and i in attacked_indices)
+            # Change to:
+            bias = self.config['spoof_bias'] if (attacked_indices is not None and i in attacked_indices) else None
             reports.append(drone.sense_gnss(bias))
         return np.array(reports)
 

@@ -1,23 +1,9 @@
 import numpy as np
 
-class Adversary:
-    def __init__(self, config):
-        self.f = config.get('f', 2)
-        self.spoof_bias = config.get('spoof_bias', np.array([50.0, 50.0, 0.0]))
-
-    def apply_attacks(self, drones, dist_matrix):
-
-        n = len(drones)
-        faulty_indices = np.random.choice(n, self.f, replace=False)
-        
-        for idx in faulty_indices:
-            drones[idx].sense_gnss(is_spoofed=True, bias=self.spoof_bias)
-        
-        for idx in faulty_indices:
-            for other_idx in range(n):
-                if idx == other_idx: continue
-                distortion = np.random.uniform(5.0, 15.0) 
-                dist_matrix[idx, other_idx] += distortion
-                dist_matrix[other_idx, idx] += distortion
-
-        return faulty_indices, dist_matrix
+def apply_spoofing(drones, f_count, offset=20.0):
+    # Select f drones to spoof [cite: 298]
+    indices = np.random.choice(len(drones), f_count, replace=False)
+    for i in indices:
+        drones[i].is_spoofed = True
+        # Inject arbitrary bias [cite: 113]
+        drones[i].reported_pos += np.random.uniform(offset, offset*2, size=3)

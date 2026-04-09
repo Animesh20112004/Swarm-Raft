@@ -1,51 +1,27 @@
 import ctypes
-import numpy as np
 import os
+import numpy as np
 
-class Point3D(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_double),
-                ("y", ctypes.c_double),
-                ("z", ctypes.c_double)]
+class Position(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double), ("z", ctypes.c_double)]
 
 class SwarmRaftBridge:
-    def __init__(self, lib_path='core/build/libswarmraft.so'):
-        self.lib = ctypes.CDLL(os.path.abspath(lib_path))
-        
-        self.lib.verify_neighbors.argtypes = [
-            ctypes.c_int, 
-            ctypes.POINTER(Point3D), 
-            ctypes.POINTER(ctypes.c_double), 
-            ctypes.c_double, 
-            ctypes.POINTER(ctypes.c_bool)
+    def __init__(self):
+        lib_path = os.path.abspath("core/build/libswarmraft.so")
+        self.lib = ctypes.CDLL(lib_path)
+        self.lib.verify_and_recover.argtypes = [
+            ctypes.c_int, ctypes.POINTER(Position), ctypes.POINTER(ctypes.c_double),
+            ctypes.c_double, ctypes.c_double, ctypes.c_int,
+            ctypes.POINTER(Position), ctypes.POINTER(ctypes.c_int)
         ]
-        
-        self.lib.recover_position.argtypes = [
-            ctypes.c_int, 
-            ctypes.c_int, 
-            ctypes.POINTER(Point3D), 
-            ctypes.POINTER(ctypes.c_double), 
-            ctypes.POINTER(ctypes.c_bool), 
-            ctypes.c_int
-        ]
-        self.lib.recover_position.restype = Point3D
 
-    def run_swarmraft(self, reports, dist_matrix, threshold=5.0):
-        n = len(reports)
+    def run_consensus(self, drones, dist_mat):
+        n = len(drones)
+        reported = (Position * n)(*[Position(*d.reported_pos) for d in drones])
+        distances = (ctypes.c_double * (n * n))(*dist_mat.flatten())
+        verified = (Position * n)()
+        flags = (ctypes.c_int * n)()
+
+        self.lib.verify_and_recover(n, reported, distances, 2.0, 5.0, 100, verified, flags)
         
-        c_reports = (Point3D * n)(*[Point3D(*r) for r in reports])
-        
-        c_dist_matrix = dist_matrix.flatten().astype(np.float64).ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-        
-        fault_flags = (ctypes.c_bool * n)()
-        
-        self.lib.verify_neighbors(n, c_reports, c_dist_matrix, threshold, fault_flags)
-        
-        recovered_positions = []
-        for i in range(n):
-            if fault_flags[i]:
-                rec_p = self.lib.recover_position(i, n, c_reports, c_dist_matrix, fault_flags, 100)
-                recovered_positions.append([rec_p.x, rec_p.y, rec_p.z])
-            else:
-                recovered_positions.append(reports[i])
-                
-        return np.array(recovered_positions), list(fault_flags)
+        return [np.array([v.x, v.y, v.z]) for v in verified], list(flags)

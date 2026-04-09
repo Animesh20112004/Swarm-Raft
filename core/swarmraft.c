@@ -1,71 +1,59 @@
 #include "swarmraft.h"
 #include <math.h>
+#include <stdlib.h>
 
-double get_dist(Point3D a, Point3D b) {
-    return sqrt(pow(a.x - b.x, 2) + pow(a.y - b.y, 2) + pow(a.z - b.z, 2));
-}
-
-void verify_neighbors(int n, Point3D* reports, double* dist_matrix, double threshold, bool* fault_flags) {
+void verify_and_recover(int n, Position* reported, double* dist_mat, double threshold, 
+                        double epsilon, int max_iter, Position* verified, int* flags) {
+    
+    // Stage 1: Voting 
     for (int i = 0; i < n; i++) {
         int votes = 0;
         for (int j = 0; j < n; j++) {
             if (i == j) continue;
-
-            double d_rep = get_dist(reports[i], reports[j]);
-            double d_meas = dist_matrix[i * n + j];
-
-            // Stage 1: Consistency check [cite: 84]
-            if (fabs(d_rep - d_meas) < threshold) {
-                votes++;
-            } else {
-                votes--;
-            }
+            double dx = reported[i].x - reported[j].x;
+            double dy = reported[i].y - reported[j].y;
+            double dz = reported[i].z - reported[j].z;
+            double calc_dist = sqrt(dx*dx + dy*dy + dz*dz);
+            
+            if (fabs(calc_dist - dist_mat[i * n + j]) < threshold) votes++;
+            else votes--;
         }
-        // Flag based on majority [cite: 120]
-        fault_flags[i] = (votes < 0);
+        flags[i] = (votes < 0) ? 1 : 0; // 1 = Faulty 
+        verified[i] = reported[i];
     }
-}
 
-Point3D recover_position(int target_idx, int n, Point3D* reports, double* dist_matrix, bool* fault_flags, int max_iterations) {
-    Point3D p = reports[target_idx]; 
-    double step_size = 0.01; // Smaller, more stable step
-    double tolerance = 1e-6;
+    // Stage 2: Multilateration Refinement [cite: 181, 307]
+    for (int i = 0; i < n; i++) {
+        if (flags[i]) {
+            Position p = reported[i]; 
+            for (int iter = 0; iter < max_iter; iter++) {
+                double grad_x = 0, grad_y = 0, grad_z = 0;
+                int anchor_count = 0;
 
-    for (int k = 0; k < max_iterations; k++) {
-        double grad_x = 0, grad_y = 0, grad_z = 0;
-        int anchors = 0;
+                for (int j = 0; j < n; j++) {
+                    if (flags[j]) continue; // Only use non-faulty anchors [cite: 174]
+                    
+                    double dx = p.x - verified[j].x;
+                    double dy = p.y - verified[j].y;
+                    double dz = p.z - verified[j].z;
+                    double d = sqrt(dx*dx + dy*dy + dz*dz) + 1e-6;
+                    double error = d - dist_mat[i * n + j];
+                    
+                    grad_x += error * (dx / d);
+                    grad_y += error * (dy / d);
+                    grad_z += error * (dz / d);
+                    anchor_count++;
+                }
 
-        for (int j = 0; j < n; j++) {
-            // Only use verified non-faulty neighbors [cite: 174, 182]
-            if (target_idx == j || fault_flags[j]) continue;
+                if (anchor_count < 3) break; // Fallback to INS if insufficient anchors [cite: 189]
 
-            double d_curr = get_dist(p, reports[j]);
-            double d_meas = dist_matrix[target_idx * n + j];
-            double err = d_curr - d_meas;
-
-            if (d_curr > 0.0001) {
-                // Gradient of the squared error: (||p - x_j|| - d_meas) * (p - x_j) / ||p - x_j|| [cite: 181]
-                grad_x += err * (p.x - reports[j].x) / d_curr;
-                grad_y += err * (p.y - reports[j].y) / d_curr;
-                grad_z += err * (p.z - reports[j].z) / d_curr;
-                anchors++;
+                p.x -= 0.1 * grad_x; // Simple gradient descent step
+                p.y -= 0.1 * grad_y;
+                p.z -= 0.1 * grad_z;
             }
+            
+            double final_dev = sqrt(pow(p.x-reported[i].x,2) + pow(p.y-reported[i].y,2));
+            if (final_dev > epsilon) verified[i] = p; // Replace if spoofing detected [cite: 274, 307]
         }
-
-        // Fallback: If Stage 1 flagged too many drones, rely on original report or INS [cite: 189, 202]
-        if (anchors < 3) return reports[target_idx];
-
-        // Normalize gradient by number of anchors to ensure O(N^2) scaling [cite: 203, 347]
-        grad_x /= anchors;
-        grad_y /= anchors;
-        grad_z /= anchors;
-
-        p.x -= step_size * grad_x;
-        p.y -= step_size * grad_y;
-        p.z -= step_size * grad_z;
-
-        // Check for convergence
-        if (sqrt(grad_x*grad_x + grad_y*grad_y + grad_z*grad_z) < tolerance) break;
     }
-    return p;
 }
