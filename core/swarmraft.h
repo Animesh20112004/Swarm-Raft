@@ -2,18 +2,17 @@
 #define SWARMRAFT_H
 
 typedef struct {
-    double x, y, z;
-} Position;
+    double x,y,z;
+} pos;
 
-// Interface for Python via ctypes
 void verify_and_recover(
     int n, 
-    Position* reported, 
-    double* distance_matrix, 
+    pos* rep, 
+    double* dist_matrix, 
     double threshold, 
     double epsilon, 
     int max_iter, 
-    Position* out_verified, 
+    pos* out_verified, 
     int* out_faulty_flags
 );
 
